@@ -17,11 +17,13 @@ import sys
 from train_multilabel import read_dataset, wrap_preprocess, binarize
 import json
 from tqdm import tqdm
+from importlib import import_module
 
 
 labels1 = ['HI', 'ID', 'IN', 'IP', 'NA', 'OP']
 int_bs = 16
 CACHE = "/scratch/project_2002026/amanda/cache/"
+SPECIAL_TOKENS = ["<s>", "</s>"]
 
 
 def argparser():
@@ -38,12 +40,16 @@ def argparser():
                     help='which labels to use, give as \'["IN","NA"]\' ')
     ap.add_argument('--split', metavar='FLOAT', type=float, default=0.8,
                     help='Set train/val data split ratio, e.g. 0.8 to train on 80 percent')
-    ap.add_argument('--downsample', metavar="BOOL", type=bool,
-                    default=True, help='downsample to 1/20th')
+    ap.add_argument('--downsample', metavar="INT", type=int,
+                    default=1, help='downsample to 1/n:th')
     ap.add_argument('--visualize', metavar="BOOL", type=bool,default=False,
                     help='If True, print HTML presentation. NOTE: this PRINTS, so redirect output using ">"!')
     ap.add_argument('--cache', default=CACHE, metavar='FILE',
                     help='Save model checkpoints to directory')
+    ap.add_argument('--parse_separately', default=None,metavar='LANGUAGE',
+                    help='Languages where separate parser is used (e.g. Chinese and Korean).')
+    ap.add_argument('--parser_model', default=None, metavar='SPACY MODEL',
+                   help='Model to do parsing.')
     ap.add_argument('--int_batch_size', metavar='INT', type=int, default=int_bs,
                     help='Batch size for integrated gradients')
     ap.add_argument('--seed', metavar='INT', type=int,
@@ -85,7 +91,7 @@ def aggregate(inp,attrs,tokenizer):
     for token_list,attr_list in zip(detokenized,attrs): #One text from the batch at a time!
         res=[]
         for token,a_val in zip(token_list,attr_list):
-            if token == "<s>" or token == "</s>":  # special tokens
+            if token in SPECIAL_TOKENS:  # special tokens
                 res.append((token,a_val))
             elif token.startswith("▁"):
                 #This NOT is a continuation. A NEW word.
@@ -102,9 +108,80 @@ def aggregate(inp,attrs,tokenizer):
         aggregated.append(res)
     return aggregated
 
+ASSERTION_MSG = lambda p,t,sp: '''
+    Given parsing of the sentence cannot be aligned.
+    Checking these might help:
+    - if string.isalpha() is applicable for your language
+    - the variable "special_tokens" contains the special tokens of your model,
+    - the two tokenizations are of the same sentence.
+    ''' + f'\nThe sentences are \n {p} \n {t} \nand the special tokens are {sp}.'
+
+def align(inp_text, inp, inp_scores):
+    """
+    Function to align two different tokenizations of the same text.
+    E.g. for Chinese, the model tokenizer might tokenize
+    母语 (mother tongue) as "母" and "语".
+    -> if you have defined a better tokenized, give both tokenizations
+    to this function and it will align them and the scores
+    associated with the model tokenizer.
+    All punctuation is removed for this tokenization.
+    -> would be removed in the keyword extraction step anyway.
+    """
+    # preprocess both
+    # start by transforming this to text:
+    tokenized=[]
+    scores = []
+    for l,s in zip(inp.input_ids.cpu().tolist()[0], inp_scores.cpu().tolist()[0]):
+        tl = tokenizer.convert_ids_to_tokens(l)
+        if tl not in SPECIAL_TOKENS:
+            tokenized.append(tl)
+            scores.append(s)
+    #tokenized=tokenized[0]  #flatten
+
+    # this serves as a new text: TODO: check that this matches inp_text
+    text = "".join(tokenized)
+    #assert 
+    parsed = [token.text for token in parser(text)]
+
+    
+    # drop things that are tokenized differently, i.e. spacy and roberta handle commas differently etc.
+    parsed = [re.sub(r'[^\D\s]|[^\w\s]', '', p) for p in parsed if any(j.isalpha() for j in p)]
+    to_be_dropped = [i for i in range(len(tokenized)) if any(j.isalpha() for j in tokenized[i])]
+    tokenized = [re.sub(r'[^\D\s]|[^\w\s]', '',tokenized[i]) for i in to_be_dropped]
+    scores = [scores[i] for i in to_be_dropped]
+
+    #print("------------------text------------------------")
+    #print(text)
+    #print("-----------------parsed-----------------------")
+    #print(parsed)
+    #print("----------------tokenized---------------------")
+    #print(tokenized)
 
 
-def explain(text,model,tokenizer,wrt_class="winner", int_bs=10, n_steps=50):
+    assert "".join(parsed)=="".join(tokenized), ASSERTION_MSG(parsed, tokenized, SPECIAL_TOKENS)
+
+    # align
+    # t_ind contains the current index we're at now in the tokenized (by model) sentence
+    t_ind=0
+    agg_scores = np.zeros(len(parsed))
+    # for each "real tokenization" (here "parsed")
+    for p_ind in range(len(parsed)):
+        sub_scores = []
+        for p in parsed[p_ind]:     # for each char in that tokenization
+            if p == tokenized[t_ind][0]:        # if theres a match
+                sub_scores.append(scores[t_ind])    # add the score for the character
+                if len(tokenized[t_ind])>1:         # remove the character for next calculation
+                    tokenized[t_ind] = tokenized[t_ind][1:]
+                else:
+                    tokenized[t_ind]="-"        # not necessary but helped debug
+                    t_ind+=1                    # move to next index
+            else:
+                raise Exception("Alignment impossible for unforeseen reasons.") # despite assertion, something went wrong
+        agg_scores[p_ind] = np.max(sub_scores)     # aggregate the scores TODO: method
+
+    return [[(p,a) for p,a in zip(parsed,agg_scores.tolist())]]#[parsed], [agg_scores.tolist()]
+
+def explain(lang, text,model,tokenizer,wrt_class="winner", int_bs=10, n_steps=50):
     # white space inbetween punctuation => for standard tokenisation
     text = re.sub('(?<! )(?=[:.,!?()])|(?<=[:.,!?()])(?! )', r' ', text) 
     # Tokenize and make the blank reference input
@@ -145,7 +222,11 @@ def explain(text,model,tokenizer,wrt_class="winner", int_bs=10, n_steps=50):
         # append the calculated and normalized scores to aggregated
         attrs_sum = attrs.sum(dim=-1)
         attrs_sum = attrs_sum/torch.norm(attrs_sum)
-        aggregated_tg=aggregate(inp,attrs_sum,tokenizer)
+        if lang in options.parse_separately:
+            #print(f'Using different parser for {lang}.')
+            aggregated_tg = align(text, inp, attrs_sum)
+        else:
+            aggregated_tg=aggregate(inp,attrs_sum,tokenizer)
         aggregated.append(aggregated_tg)
 
     # these are wonky but will have dim numberofpredictions x 1
@@ -216,23 +297,29 @@ def explain_and_save_documents(dataset, model, tokenizer, options):
                 txt = " "   # for empty sentences
 
             # do a prediction and explanation
-            target, aggregated, probs = explain(txt, model, tokenizer, int_bs=options.int_batch_size)
-            if target != None:
-                # for all labels, tokens, and their agg scores: save a line in the document
-                for tg, ag in zip(target[0], aggregated):
-                    target = tg
-                    aggregated = ag
-                    for tok,a_val in aggregated[0]:
-                        line = [id, str(lbl), [options.id2label[target]], str(tok), a_val, probs.tolist()]
+            errors = 0
+            try:
+                target, aggregated, probs = explain(key, txt, model, tokenizer, int_bs=options.int_batch_size)
+                if target != None:
+                    # for all labels, tokens, and their agg scores: save a line in the document
+                    for tg, ag in zip(target[0], aggregated):
+                        target = tg
+                        aggregated = ag
+                        for tok,a_val in aggregated[0]:
+                            line = [id, str(lbl), [options.id2label[target]], str(tok), a_val, probs.tolist()]
+                            save_matrix.append(line)
+                        # print visualisation in HTML format
+                        if options.visualize:
+                            print_aggregated([options.id2label[target]],aggregated,lbl)
+                else:  #for no prediction, save None for target and score    TODO: Maybe still tokenize here?
+                    for word in txt.split():
+                        line = [id, str(lbl), "None", word, "None", probs.tolist()]
                         save_matrix.append(line)
-                    # print visualisation in HTML format
-                    if options.visualize:
-                        print_aggregated([options.id2label[target]],aggregated,lbl)
-            else:  #for no prediction, save None for target and score    TODO: Maybe still tokenize here?
-                for word in txt.split():
-                    line = [id, str(lbl), "None", word, "None", probs.tolist()]
-                    save_matrix.append(line)
-
+            except:
+                errors=0
+                continue
+            
+        print(f'ENCOUNTERED {errors} parsing error(s)!')
         # save the results
         filename = options.save_file+"_"+str(options.seed)+"_"+key+'.tsv'
         pd.DataFrame(save_matrix, columns=["id", "label","pred","token","score","probs"]).to_csv(filename, sep="\t")
@@ -240,10 +327,15 @@ def explain_and_save_documents(dataset, model, tokenizer, options):
         
     #return save_matrix
     
+import spacy
 
 if __name__=="__main__":
     options = argparser().parse_args(sys.argv[1:])
-    
+    if options.parse_separately is not None and options.parser_model is not None:
+        #module = import_module("spacy")
+        parser = spacy.load(options.parser_model)
+        print(f'{options.parser_model} loaded from spacy.')
+
     tokenizer = AutoTokenizer.from_pretrained(options.base_model)
     model = torch.load(options.trained_model)
     model.to('cuda')
