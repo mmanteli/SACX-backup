@@ -12,54 +12,16 @@ import numpy as np
 from datasets import load_dataset
 import pandas as pd
 import csv
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+#from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+from arguments import argparser
 import sys
-from train_multilabel import read_dataset, wrap_preprocess, binarize
+from data_preparation import read_dataset, wrap_preprocess, binarize
 import json
 from tqdm import tqdm
 from importlib import import_module
+import spacy
 
-
-labels1 = ['HI', 'ID', 'IN', 'IP', 'NA', 'OP']
-int_bs = 16
-CACHE = "/scratch/project_2002026/amanda/cache/"
-SPECIAL_TOKENS = ["<s>", "</s>"]
-
-
-def argparser():
-    ap = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-    ap.add_argument('--base_model','--model_name', default="xlm-roberta-base",
-                    help='Base model name for tokenizer')
-    ap.add_argument('--trained_model', default=None, required=True,
-                    help='Path to trained model')
-    ap.add_argument('--data_name',type=str, metavar='HF-DATASETNAME', default="TurkuNLP/register_oscar",
-                    help='Name of the dataset')
-    ap.add_argument('--language',  type=json.loads,default=["en"], metavar='LIST-LIKE',
-                    help='Language to be used from the dataset. Give as \'["en","zh"]\' ')
-    ap.add_argument('--labels', type=json.loads, default=labels1, metavar='LIST-LIKE',
-                    help='which labels to use, give as \'["IN","NA"]\' ')
-    ap.add_argument('--split', metavar='FLOAT', type=float, default=0.8,
-                    help='Set train/val data split ratio, e.g. 0.8 to train on 80 percent')
-    ap.add_argument('--downsample', metavar="INT", type=int,
-                    default=1, help='downsample to 1/n:th')
-    ap.add_argument('--visualize', metavar="BOOL", type=bool,default=False,
-                    help='If True, print HTML presentation. NOTE: this PRINTS, so redirect output using ">"!')
-    ap.add_argument('--cache', default=CACHE, metavar='FILE',
-                    help='Save model checkpoints to directory')
-    ap.add_argument('--parse_separately', default=None,metavar='LANGUAGE',
-                    help='Languages where separate parser is used (e.g. Chinese and Korean).')
-    ap.add_argument('--parser_model', default=None, metavar='SPACY MODEL',
-                   help='Model to do parsing.')
-    ap.add_argument('--int_batch_size', metavar='INT', type=int, default=int_bs,
-                    help='Batch size for integrated gradients')
-    ap.add_argument('--seed', metavar='INT', type=int,
-                    default=123, help='Random seed for splitting data')
-    ap.add_argument('--save_file', default="./explanations/exp", metavar='FILE',
-                    help='Path to save file. "_language.tsv" added in the script.')
-    return ap
-
-
-
+SPECIAL_TOKENS=["<s>", "</s>"]
 
 # # Forward on the model -> data in, prediction out, nothing fancy really
 def predict(model, inputs, int_bs=None, attention_mask=None):
@@ -81,8 +43,11 @@ def summarize_attributions(attributions):
     attributions = attributions / torch.norm(attributions)
     return attributions
 
+
+#---------------------------------from predictions to words--------------------------------#
+
 def aggregate(inp,attrs,tokenizer):
-    """detokenize and merge attributions"""
+    """Detokenize and merge attributions. This works for languages that use white spaces between the words."""
     detokenized=[]
     for l in inp.input_ids.cpu().tolist():
         detokenized.append(tokenizer.convert_ids_to_tokens(l))
@@ -121,12 +86,13 @@ def align(inp_text, inp, inp_scores):
     Function to align two different tokenizations of the same text.
     E.g. for Chinese, the model tokenizer might tokenize
     母语 (mother tongue) as "母" and "语".
-    -> if you have defined a better tokenized, give both tokenizations
+    -> if you have defined a better tokenizer, give both tokenizations
     to this function and it will align them and the scores
     associated with the model tokenizer.
     All punctuation is removed for this tokenization.
     -> would be removed in the keyword extraction step anyway.
     """
+    
     # preprocess both
     # start by transforming this to text:
     tokenized=[]
@@ -156,10 +122,10 @@ def align(inp_text, inp, inp_scores):
     #print(parsed)
     #print("----------------tokenized---------------------")
     #print(tokenized)
-
+    
 
     assert "".join(parsed)=="".join(tokenized), ASSERTION_MSG(parsed, tokenized, SPECIAL_TOKENS)
-
+    
     # align
     # t_ind contains the current index we're at now in the tokenized (by model) sentence
     t_ind=0
@@ -223,7 +189,7 @@ def explain(lang, text,model,tokenizer,wrt_class="winner", int_bs=10, n_steps=50
         attrs_sum = attrs.sum(dim=-1)
         attrs_sum = attrs_sum/torch.norm(attrs_sum)
         if lang in options.parse_separately:
-            #print(f'Using different parser for {lang}.')
+            print(f'Using different parser for {lang}.')
             aggregated_tg = align(text, inp, attrs_sum)
         else:
             aggregated_tg=aggregate(inp,attrs_sum,tokenizer)
@@ -316,7 +282,7 @@ def explain_and_save_documents(dataset, model, tokenizer, options):
                         line = [id, str(lbl), "None", word, "None", probs.tolist()]
                         save_matrix.append(line)
             except:
-                errors=0
+                errors+=1
                 continue
             
         print(f'ENCOUNTERED {errors} parsing error(s)!')
@@ -327,17 +293,17 @@ def explain_and_save_documents(dataset, model, tokenizer, options):
         
     #return save_matrix
     
-import spacy
+
 
 if __name__=="__main__":
     options = argparser().parse_args(sys.argv[1:])
     if options.parse_separately is not None and options.parser_model is not None:
-        #module = import_module("spacy")
         parser = spacy.load(options.parser_model)
         print(f'{options.parser_model} loaded from spacy.')
+    print(options)
 
-    tokenizer = AutoTokenizer.from_pretrained(options.base_model)
-    model = torch.load(options.trained_model)
+    tokenizer = AutoTokenizer.from_pretrained(options.model_name)
+    model = torch.load(options.save_model)
     model.to('cuda')
     print("Model loaded succesfully.")
 

@@ -1,11 +1,13 @@
 # results
 explanations
+__pycache__
 results
 keywords
 logs
 mlruns
 models
 tests
+test*.sh
 todo
 *_test
 visualisations
