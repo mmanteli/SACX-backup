@@ -35,6 +35,6 @@ python train_and_explain.py --language='["en", "fr", "jp"]' <other params> --par
 ```
 python train_multilabel.py --language='["jp", "zh"]' --save_model=<path to model>
 python explain_multilabel.py --trained_model=<path to model> --language='["jp"]' --parse_separately="jp" --parser_model="jp_core_news_md"
-python explain_multilabel.py --trained_model=<path to model> --language='["xh"]' --parse_separately="zh" --parser_model="zh_core_web_md"
+python explain_multilabel.py --trained_model=<path to model> --language='["zh"]' --parse_separately="zh" --parser_model="zh_core_web_md"
 ```
 
