@@ -20,6 +20,7 @@ import json
 from tqdm import tqdm
 from importlib import import_module
 import spacy
+import warnings
 
 SPECIAL_TOKENS=["<s>", "</s>"]
 
@@ -188,7 +189,7 @@ def explain(lang, text,model,tokenizer,wrt_class="winner", int_bs=10, n_steps=50
         # append the calculated and normalized scores to aggregated
         attrs_sum = attrs.sum(dim=-1)
         attrs_sum = attrs_sum/torch.norm(attrs_sum)
-        if lang in options.parse_separately:
+        if options.parse_separately is not None and lang in options.parse_separately:
             print(f'Using different parser for {lang}.')
             aggregated_tg = align(text, inp, attrs_sum)
         else:
@@ -303,16 +304,32 @@ if __name__=="__main__":
     print(options)
 
     tokenizer = AutoTokenizer.from_pretrained(options.model_name)
-    model = torch.load(options.save_model)
+    try:
+        model = torch.load(options.save_model)
+    except:
+        try:
+            model = transformers.AutoModelForSequenceClassification.from_pretrained(options.save_model)
+        except:
+            print("Cannot load model using either torch or transformers.AutoModel")
     model.to('cuda')
     print("Model loaded succesfully.")
 
-    options.id2label = model.config.id2label
 
-    # load the test data
+    # load the test data, and define label2id/id2label based on the data
     dataset = read_dataset(options)
     dataset = dataset.map(wrap_preprocess(options))
     dataset, mlb_classes = binarize(dataset, options)
+    options.label2id = dict(zip(mlb_classes, [i for i in range(0, len(mlb_classes))]))
+    options.id2label = {v:k for k,v in options.label2id.items()}
+    
+
+    if model.config.id2label != options.id2label:
+        warnings.warn(f'Model id2label dictionary and the one extracted from data do not match. \n \
+        Model id2label: {model.config.id2label},\n \
+        Data id2label: {options.id2label},\n \
+        Changing model config to follow data. ')
+        model.config.id2label = options.id2label
+        model.config.label2id = {v:k for k,v in options.id2label.items()}
     
     print("Dataset loaded. Ready for explainability.\n")
 
