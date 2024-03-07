@@ -16,6 +16,7 @@ import csv
 from arguments import argparser
 import sys
 from data_preparation import read_dataset, wrap_preprocess, binarize
+from sklearn.metrics import classification_report
 import json
 from tqdm import tqdm
 from importlib import import_module
@@ -242,29 +243,33 @@ def explain_and_save_documents(dataset, model, tokenizer, options):
     doc_0  [2,4]  3     doc   (score)  (sigm)
     The scores are calculate wrt predicted class, hence two sets of scores are needed.
     """
+    reports = []
     for key in options.language:
         # all results saved here
         save_matrix = []
         print(f'Explaining {key}...')
 
+        # collect
+        errors = 0
+        trues = []
+        preds = []
         # loop over the dataset. Index "i" used here in case the dataset does not contain "id".
         for i in tqdm(range(len(dataset["validation_"+str(key)]))):
             # prepocess everything that is needed for saving and calculation
             txt = dataset["validation_"+str(key)]['text'][i]
-            lbl = dataset["validation_"+str(key)]['labels'][i]
+            lbl_ = dataset["validation_"+str(key)]['labels'][i]
             try:
                 id = dataset["validation_"+str(key)]['id'][i]
             except:
                 id = 'document_'+str(i)
             # change label first to index format and then to class name => same happens to prediction later
-            lbl = [options.id2label[i] for i,v in enumerate(lbl[0]) if v ==1]
+            lbl = [options.id2label[i] for i,v in enumerate(lbl_[0]) if v ==1]
             if len(lbl)==0:
                 lbl=None    # change empty to None for later easy filtering
             if txt == None:
                 txt = " "   # for empty sentences
 
             # do a prediction and explanation
-            errors = 0
             try:
                 target, aggregated, probs = explain(key, txt, model, tokenizer, int_bs=options.int_batch_size)
                 if target != None:
@@ -282,17 +287,26 @@ def explain_and_save_documents(dataset, model, tokenizer, options):
                     for word in txt.split():
                         line = [id, str(lbl), "None", word, "None", probs.tolist()]
                         save_matrix.append(line)
-            except:
+                trues.append(lbl_[0])
+                p = np.zeros(len(options.label2id), dtype=int)
+                if target != None:
+                    p[target] = 1
+                preds.append(p)
+            except Exception as e:
+                file1 = open("errors.err", "a")
+                file1.write(str(e))
+                file1.write("\n\n")
                 errors+=1
                 continue
             
-        print(f'ENCOUNTERED {errors} parsing error(s)!')
+        print(f'ENCOUNTERED {errors} error(s)!')
         # save the results
         filename = options.save_file+"_"+str(options.seed)+"_"+key+'.tsv'
         pd.DataFrame(save_matrix, columns=["id", "label","pred","token","score","probs"]).to_csv(filename, sep="\t")
         print("Dataset "+ key +" succesfully saved")
+        reports.append(classification_report(trues, preds, target_names = options.label2id.keys()))
         
-    #return save_matrix
+    return save_matrix, reports
     
 
 
@@ -334,4 +348,6 @@ if __name__=="__main__":
     print("Dataset loaded. Ready for explainability.\n")
 
     # loop over languages
-    explain_and_save_documents(dataset, model, tokenizer, options)
+    m, reports = explain_and_save_documents(dataset, model, tokenizer, options)
+    for r in reports:
+        print(r)
