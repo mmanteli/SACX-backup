@@ -8,6 +8,7 @@ import pandas as pd
 import json
 from torch import cuda
 import torch
+import spacy
 
 # logging
 from transformers.utils.logging import WARNING as log_level
@@ -46,6 +47,9 @@ def train_and_explain(options):
 
     # explain
     print("Explaining",flush=True)
+    if options.parse_separately is not None and options.parser_model is not None:
+        options.parser = spacy.load(options.parser_model)
+        print(f'{options.parser_model} loaded from spacy.')
     explain_multilabel.explain_and_save_documents(dataset, trained_model, tokenizer, options)
     
 

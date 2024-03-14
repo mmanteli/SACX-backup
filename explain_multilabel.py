@@ -83,7 +83,7 @@ ASSERTION_MSG = lambda p,t,sp: '''
     - the two tokenizations are of the same sentence.
     ''' + f'\nThe sentences are \n {p} \n {t} \nand the special tokens are {sp}.'
 
-def align(inp_text, inp, inp_scores):
+def align(inp_text, inp, inp_scores, tokenizer,parser):
     """
     Function to align two different tokenizations of the same text.
     E.g. for Chinese, the model tokenizer might tokenize
@@ -149,7 +149,8 @@ def align(inp_text, inp, inp_scores):
 
     return [[(p,a) for p,a in zip(parsed,agg_scores.tolist())]]#[parsed], [agg_scores.tolist()]
 
-def explain(lang, text,model,tokenizer,wrt_class="winner", int_bs=10, n_steps=50):
+#explain(key, txt, model, tokenizer, options, int_bs=options.int_batch_size)
+def explain(lang, text,model,tokenizer, options, wrt_class="winner", int_bs=10, n_steps=50):
     # white space inbetween punctuation => for standard tokenisation
     text = re.sub('(?<! )(?=[:.,!?()])|(?<=[:.,!?()])(?! )', r' ', text) 
     # Tokenize and make the blank reference input
@@ -192,7 +193,7 @@ def explain(lang, text,model,tokenizer,wrt_class="winner", int_bs=10, n_steps=50
         attrs_sum = attrs_sum/torch.norm(attrs_sum)
         if options.parse_separately is not None and lang in options.parse_separately:
             print(f'Using different parser for {lang}.')
-            aggregated_tg = align(text, inp, attrs_sum)
+            aggregated_tg = align(text, inp, attrs_sum, tokenizer, options.parser)
         else:
             aggregated_tg=aggregate(inp,attrs_sum,tokenizer)
         aggregated.append(aggregated_tg)
@@ -271,7 +272,7 @@ def explain_and_save_documents(dataset, model, tokenizer, options):
 
             # do a prediction and explanation
             try:
-                target, aggregated, probs = explain(key, txt, model, tokenizer, int_bs=options.int_batch_size)
+                target, aggregated, probs = explain(key, txt, model, tokenizer, options, int_bs=options.int_batch_size)
                 if target != None:
                     # for all labels, tokens, and their agg scores: save a line in the document
                     for tg, ag in zip(target[0], aggregated):
@@ -313,7 +314,7 @@ def explain_and_save_documents(dataset, model, tokenizer, options):
 if __name__=="__main__":
     options = argparser().parse_args(sys.argv[1:])
     if options.parse_separately is not None and options.parser_model is not None:
-        parser = spacy.load(options.parser_model)
+        options.parser = spacy.load(options.parser_model)
         print(f'{options.parser_model} loaded from spacy.')
     print(options)
 
