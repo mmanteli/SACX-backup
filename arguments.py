@@ -18,7 +18,7 @@ done
 # with slurm it is recommended that you sbatch the jobs separately.
 # depending on the dataset size the runtime is 20min to 4 hours
 
-
+# this comment is here to test git on LUMI
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import json
