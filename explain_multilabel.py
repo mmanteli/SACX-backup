@@ -272,11 +272,15 @@ def explain_and_save_documents(dataset, model, tokenizer, options):
 
             # do a prediction and explanation
             try:
-                target, aggregated, probs = explain(key, txt, model, tokenizer, options, int_bs=options.int_batch_size)
-                if target != None:
+                target_full, aggregated, probs = explain(key, txt, model, tokenizer, options, int_bs=options.int_batch_size)
+                #print(f"full target is {target_full}", flush=True)
+                if target_full != None:
                     # for all labels, tokens, and their agg scores: save a line in the document
-                    for tg, ag in zip(target[0], aggregated):
-                        target = tg
+                    for tg, ag in zip(target_full[0], aggregated):
+                        target = tg if tg in options.id2label.keys() else None
+                        if target == None:   # skipping labels not listed in labels.
+                            continue
+                        #print(f'From full traget extracted {target}')
                         aggregated = ag
                         for tok,a_val in aggregated[0]:
                             line = [id, str(lbl), [options.id2label[target]], str(tok), a_val, probs.tolist()]
@@ -290,8 +294,8 @@ def explain_and_save_documents(dataset, model, tokenizer, options):
                         save_matrix.append(line)
                 trues.append(lbl_[0])
                 p = np.zeros(len(options.label2id), dtype=int)
-                if target != None:
-                    p[target] = 1
+                if target_full != None:
+                    p[target_full] = 1
                 preds.append(p)
             except Exception as e:
                 file1 = open("errors.err", "a")

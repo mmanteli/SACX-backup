@@ -3,7 +3,7 @@ from arguments import argparser
 import re
 import sys
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from datasets import load_dataset, concatenate_datasets, DatasetDict
+from datasets import load_dataset, concatenate_datasets, DatasetDict, load_from_disk
 from sklearn.preprocessing import MultiLabelBinarizer
 from datasets import disable_caching
 disable_caching()    #this stops cache for map()
@@ -70,6 +70,14 @@ def read_csv(options):
         )
     return dataset
 
+def read_local_huggingface(options):
+    ds = {}
+    for lang in options.language:
+        d = load_from_disk(options.data_name+f"/{lang}.hf")
+        ds[lang] = d["train"]
+
+    return DatasetDict(ds)
+
 def read_huggingface(options):
     print(f'reading {options.data_name}')
     try:
@@ -93,10 +101,14 @@ def read_dataset(options):
 
     if options.data_type=="huggingface":
         dataset = read_huggingface(options)
+    elif options.data_type=="local_huggingface":
+        dataset = read_local_huggingface(options)
     elif options.data_type=="oscar":
         dataset = read_oscar(options)
     elif options.data_type=="csv":
         dataset = read_csv(options)
+    else:
+        print(f'{options.data_type} given incorrectly.')
         
     if options.downsample is not None:
         suffix_dict = {1:"st", 2:"nd", 3:"rd"}
@@ -129,7 +141,11 @@ def wrap_preprocess(options):
         # only keeping labels we're interested in
         d["labels"] = [i for i in d["labels"] if i in options.labels]
         # removing punctuation
-        d["text"] =re.sub(r"([\.,:;\!\?\"\(\)])([\w\d])", r"\1 \2", re.sub(r"([\.,:;\!\?\"\(\)])([\w\d])", r"\1 \2", d['text']))
+        try:
+            d["text"] =re.sub(r"([\.,:;\!\?\"\(\)])([\w\d])", r"\1 \2", re.sub(r"([\.,:;\!\?\"\(\)])([\w\d])", r"\1 \2", d['text']))
+        except:
+            assert d["text"] is None, f'Unknown error caused by following text:\n {d["text"]}\n'
+            d["text"] = "" # if text was null, return empty, will be removed later 
         return d
     return preprocess
 
@@ -142,14 +158,21 @@ def binarize(dataset, options):
     dataset = dataset.map(lambda line: {'labels': mlb.transform([line['labels']])})
     return dataset, mlb.classes_
 
+def wrap_label_encoding(options):
+    def encode_with_given_labels(d):
+        result = [0]*len(options.labels)
+        for d_ in d["labels"]:
+            result[options.label2id[d_]] += 1
+        return {'original_label': d["labels"], 'labels': [result]}
+    return encode_with_given_labels
 
 def wrap_tokenizer(tokenizer):
     def encode_dataset(d):
         try:
-            output = tokenizer(d['text'], truncation= True, padding = True, max_length=512)
+            output = tokenizer(d['text'], padding = True, max_length=512, return_tensors="pt").to("cuda")
             return output
         except:     #for empty text
-            output = tokenizer(" ", truncation= True, padding = True, max_length=512)
+            output = tokenizer(" ", padding = True, max_length=512, return_tensors="pt").to("cuda")
             return output
 
     return encode_dataset
@@ -160,11 +183,21 @@ def process_dataset(dataset, options):
     dataset = dataset.map(wrap_preprocess(options))
     dataset = dataset.filter(lambda example: example["labels"]!=[])
     # binarize
-    dataset, mlb_classes = binarize(dataset, options)
-    # update options to contain mappings for labels => this for some reason works for binarized labels
-    options.label2id = dict(zip(mlb_classes, [i for i in range(0, len(mlb_classes))]))
-    options.id2label = {v:k for k,v in options.label2id.items()}
+    if not hasattr(options,"label2id") and not hasattr(options,"id2label"):
+        dataset, mlb_classes = binarize(dataset, options)
+        # update options to contain mappings for labels => this for some reason works for binarized labels
+        options.label2id = dict(zip(mlb_classes, [i for i in range(0, len(mlb_classes))]))
+        options.id2label = {v:k for k,v in options.label2id.items()}
+    else:
+        # some mapping given already, see which one:
+        if not hasattr(options,"label2id"):
+            options.id2label =  {v:k for k,v in options.label2id.items()}
+        else:
+            options.label2id = {v:k for k,v in options.id2label.items()}
+        # binarize yourself
+        dataset = dataset.map(wrap_label_encoding(options))
     # tokenize
+    print(f"Dataset instances before tokenisation: {dataset['train'][0]}")
     print("Tokenizing...")
     tokenizer = AutoTokenizer.from_pretrained(options.model_name, cache_dir=options.cache)
     dataset = dataset.map(wrap_tokenizer(tokenizer))
