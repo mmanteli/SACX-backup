@@ -271,45 +271,53 @@ def explain_and_save_documents(dataset, model, tokenizer, options):
                 txt = " "   # for empty sentences
 
             # do a prediction and explanation
-            try:
-                target_full, aggregated, probs = explain(key, txt, model, tokenizer, options, int_bs=options.int_batch_size)
-                #print(f"full target is {target_full}", flush=True)
-                if target_full != None:
-                    # for all labels, tokens, and their agg scores: save a line in the document
-                    for tg, ag in zip(target_full[0], aggregated):
-                        target = tg if tg in options.id2label.keys() else None
-                        if target == None:   # skipping labels not listed in labels.
-                            continue
-                        #print(f'From full traget extracted {target}')
-                        aggregated = ag
-                        for tok,a_val in aggregated[0]:
-                            line = [id, str(lbl), [options.id2label[target]], str(tok), a_val, probs.tolist()]
-                            save_matrix.append(line)
-                        # print visualisation in HTML format
-                        if options.visualize:
-                            print_aggregated([options.id2label[target]],aggregated,lbl)
-                else:  #for no prediction, save None for target and score    TODO: Maybe still tokenize here?
-                    for word in txt.split():
-                        line = [id, str(lbl), "None", word, "None", probs.tolist()]
+            #try:
+            target_full, aggregated, probs = explain(key, txt, model, tokenizer, options, int_bs=options.int_batch_size)
+            #print(f"full target is {target_full}", flush=True)
+            if target_full != None:
+                # for all labels, tokens, and their agg scores: save a line in the document
+                for tg, ag in zip(target_full[0], aggregated):
+                    target = tg if tg in options.id2label.keys() else None
+                    if target == None:   # skipping labels not listed in labels.
+                        continue
+                    #print(f'From full traget extracted {target}')
+                    aggregated = ag
+                    for tok,a_val in aggregated[0]:
+                        line = [id, str(lbl), [options.id2label[target]], str(tok), a_val, probs.tolist(), target_full]
                         save_matrix.append(line)
-                trues.append(lbl_[0])
-                p = np.zeros(len(options.label2id), dtype=int)
-                if target_full != None:
-                    p[target_full] = 1
-                preds.append(p)
-            except Exception as e:
-                file1 = open("errors.err", "a")
-                file1.write(str(e))
-                file1.write("\n\n")
-                errors+=1
-                continue
+                    # print visualisation in HTML format
+                    if options.visualize:
+                        print_aggregated([options.id2label[target]],aggregated,lbl)
+            else:  #for no prediction, save None for target and score    TODO: Maybe still tokenize here?
+                for word in txt.split():
+                    line = [id, str(lbl), "None", word, "None", probs.tolist(), target_full]
+                    save_matrix.append(line)
+            trues.append(lbl_[0])
+            p = np.zeros(len(options.label2id), dtype=int)
+            if target_full != None:
+                for tg, ag in zip(target_full[0], aggregated):
+                    target = tg if tg in options.id2label.keys() else None
+                    p[target] = 1
+            preds.append(p)
+            #except Exception as e:
+            #    file1 = open("errors.err", "a")
+            #    file1.write(str(e)+ " at " + str(id) + " index "+ str(i))
+            #    file1.write("\n\n")
+            #    errors+=1
+            #    continue
             
-        print(f'ENCOUNTERED {errors} error(s)!')
-        # save the results
-        filename = options.save_file+"_"+str(options.seed)+"_"+key+'.tsv'
-        pd.DataFrame(save_matrix, columns=["id", "label","pred","token","score","probs"]).to_csv(filename, sep="\t")
-        print("Dataset "+ key +" succesfully saved")
+            #print(f'ENCOUNTERED {errors} error(s)!')
+            # save the results
+            if i != 0 and i % 600 == 0:
+                filename = options.save_file+"_"+str(options.seed)+"_"+key+"_shard"+str(i)+'.tsv'
+                pd.DataFrame(save_matrix, columns=["id", "label","pred","token","score","probs","full_prediction_as_vec"]).to_csv(filename, sep="\t")
+                print("Dataset "+ key +f" shard {i} succesfully saved", flush=True)
+                save_matrix = []
+        filename = options.save_file+"_"+str(options.seed)+"_"+key+"_shard"+str(i)+'.tsv'
+        pd.DataFrame(save_matrix, columns=["id", "label","pred","token","score","probs","full_prediction_as_vec"]).to_csv(filename, sep="\t")
+        print("Dataset "+ key +f" final succesfully saved")
         reports.append(classification_report(trues, preds, target_names = options.label2id.keys()))
+        print(reports[-1])
         
     return save_matrix, reports
     

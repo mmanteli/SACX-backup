@@ -10,6 +10,7 @@ import pandas as pd
 import warnings
 import json
 import matplotlib.pyplot as plt
+import os
 
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
@@ -24,7 +25,7 @@ SELECTION_FREQ = 0.6
 STD_THRESHOLD = 0.2
 MIN_WORD_FREQ = 3
 PREDICTION_THRESHOLD = 0.5
-SAVE_N = 100
+SAVE_N = 200
 QUANTILE = 0.25
 SAVE_FILE = "keywords/"
 
@@ -173,12 +174,15 @@ def extract_keywords(options):
     
     # read all files with id, token, label, pred, score, logits
     df_full, num_files = read_files(options)
+    num_files=10
+    print("Set num files to 10 due to sharding. Remove this if accidentally left in. TODO")
     df_full["pred"].apply(lambda x: list(map(str, eval(x))))
     df_full["label"].apply(lambda x: list(map(str, eval(x))))
     labels = df_full.pred.unique()
     print("Found labels are: ", labels)
     # Filter out tokens without any letters => remove years, punctuation, quotation marks... TODO: maybe before choose n??
     df_full = df_full[df_full['token'].apply(lambda x: any([y.isalpha() for y in x]))] 
+    print(f'size of data before other calculations is {len(df_full)}')
 
     # limit the analysis for correct classifications or false classifications (default: no limitation):
     if options.style=="exact":
@@ -197,11 +201,12 @@ def extract_keywords(options):
     # token       label   score            score_mean   score_std     source
     # mouse       [5]     [0.5, 0.4]       [0.45]       [0.05]        [file2, file4]
     # mouse       [3]     [0.2]            [0.2]        [0.00]        [file2]
-
+    print(f'full data after TP/FN selction {len(df_full)}')
     # do what is described above
     freq_array = class_frequencies(df_full)
     # map to contain the number of times selected
     freq_array["source_number"] = freq_array['source'].apply(lambda x: len(x))
+    print(f'lenght of freq array is {len(freq_array)}')
 
     print("Filtering", flush=True)
     if options.filter == 'std':
@@ -219,7 +224,8 @@ def extract_keywords(options):
     df_save = df_save.sort_values(['pred','score_mean'], ascending=[True, False]).groupby(['pred'],as_index=False).head(options.save_n)
     df_unstable = df_unstable.sort_values(['pred','score_mean'], ascending=[True, False]).groupby(['pred'], as_index=False).head(options.save_n)
 
-
+    print(f'After sorting, length of data is {len(df_save)}')
+    print(f'After sorting, length of ustable data is {len(df_unstable)}')
     # drop info that is no longer needed
     df_save.drop(['score','source'], axis=1, inplace=True)
     df_unstable.drop(['score','source'], axis=1, inplace=True)
@@ -246,5 +252,6 @@ def extract_keywords(options):
 if __name__=="__main__":
     #print("kws.py",flush = True)
     options = argparser().parse_args(sys.argv[1:])
+    os.makedirs(os.path.dirname(options.save_file), exist_ok=True)
     print(options, "\n",flush = True)
     extract_keywords(options)

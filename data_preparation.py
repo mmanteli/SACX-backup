@@ -199,6 +199,8 @@ def process_dataset(dataset, options):
     # tokenize
     print(f"Dataset instances before tokenisation: {dataset['train'][0]}")
     print("Tokenizing...")
+    print("REMOVING UNNEEDED SPLITS")
+    dataset = DatasetDict({key:value for key, value in dataset.items() if key not in ["train", "validation"]})
     tokenizer = AutoTokenizer.from_pretrained(options.model_name, cache_dir=options.cache)
     dataset = dataset.map(wrap_tokenizer(tokenizer))
     return dataset, tokenizer

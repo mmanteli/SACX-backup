@@ -9,6 +9,7 @@ error*
 mlruns
 models
 tests
+test*
 test*.sh
 todo
 *_test

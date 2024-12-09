@@ -32,7 +32,8 @@ DELIMITER = '\t'
 LANGUAGE = ["en"]  # Can have multiple, if DATA_NAME is a path, give equal amount of languages as paths
 labels1 = ['HI', 'ID', 'IN', 'IP', 'NA', 'OP']#, 'av', 'ds', 'dtp', 'ed', 'en', 'fi', 'it', 'lt', 'mt', 'nb', 'ne', 'ob', 'ra', 're', 'rs', 'rv', 'sr']
 labels2 = ['HI', 'ID', 'IN', 'IP', 'NA', 'OP', 'LY', 'SP']
-threshold=0.5   # prediction threshold
+column_name = "labels"  # which column of labels read for predictions/true positives
+threshold=0.4   # prediction threshold
 VISUALIZE = False    # if True, prints, so redirect output to a .html file
 PARSE_SEPARATELY = None  # similar to language
 PARSER_MODEL = None  # similar to data_name, as a list or separate by comma
@@ -65,6 +66,8 @@ def argparser():
                     help='Language to be used from the dataset, if applicable. Give as \'["en","zh"]\'. ')
     ap.add_argument('--labels', type=json.loads, metavar='LIST-LIKE', default=labels1,
                     help='which labels to use, give as \'["IN","NA"]\'. Others discarded. ')
+    ap.add_argument('--label_column', type=str, metavar='COLUMN-NAME', default=column_name,
+                    help='which column of data contains the labels/predictions. TODO.')
     ap.add_argument('--threshold', type=float, metavar='FLOAT', default=threshold,
                     help='Prediction threshold for the classifier. NOT TESTED.')
     ap.add_argument('--visualize', metavar="BOOL", type=bool, default=VISUALIZE,
