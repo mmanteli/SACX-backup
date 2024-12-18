@@ -1,14 +1,17 @@
 # SACX-backup
-Backup for SACX keyword extraction pipeline
 
-What it does?
+Further development for SACX keyword extraction pipeline. See [TurkuNLP class-explainer](https://github.com/TurkuNLP/class-explainer) for the implementation used in the original paper.
 
-- Runs multiple multilabel classification models and uses the Integrated Gradients method to explain the results of the classifier.
+## What it does?
+
+- Trains multilabel classification models and uses the Integrated Gradients method to explain the results of the classifier.
   - i.e. IG method scores words based on their relevance in the classification
   - We're trying to see which words consistently score high -> keywords
 - Aggregates the results over all trained models and produces lists of keywords for each class in the classification.
 
-How to run?
+## How to run?
+
+### From scratch:
 
 - run ``train_and_explain.py`` with different seed values:
   - with Slurm: run ``sbatch sl-train-explain.bash <insert seed value here>`` with 10+ different seed values.
@@ -18,8 +21,12 @@ How to run?
 - run ``kws.py`` with the results produced by training-explaining.
 - If needed, corpus information can be used. In that case, before ``kws.py``, run ``count_class_words.py`` which calculates term and document frequencies.
   - give the result as a parameter --corpus_information to ``kws.py`` and a limit for term frequency as --min_word_freq
+
+### With already-trained models
+
+- run ``sl-explain.sh`` with all the different models you have as parameter ``--trained_model`` (note that basename is still needed for tokenizer!)
  
-Multilingual?
+## Multilingual?
 
 - you can give multiple languages as --language='["en", "fr", "zh"]' etc.
 - trains with all languages, explains them separately.
