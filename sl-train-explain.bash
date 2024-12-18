@@ -19,7 +19,8 @@ ln -s $SLURM_JOBID.out logs/current.out
 module purge
 module use /appl/local/csc/modulefiles
 module load pytorch/2.4
-source .venv/bin/activate
+export PYTHONPATH=/scratch/project_462000353/amanda/keywords/PYTHONUSERBASE/lib/python3.10/site-packages:$PYTHONPATH
+#source .venv/bin/activate
 
 srun python train_and_explain.py \
   --seed $1 \
