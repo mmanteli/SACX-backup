@@ -1,6 +1,8 @@
 # SACX-backup
 Backup for SACX keyword extraction pipeline
 
+## NOTICE SEPARATE LUMI BRANCH FOR RUNNING THIS ON LUMI!!!
+
 What it does?
 
 - Runs multiple multilabel classification models and uses the Integrated Gradients method to explain the results of the classifier.
